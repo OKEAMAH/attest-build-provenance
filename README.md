@@ -36,7 +36,7 @@ attest:
    ```
 
    The `id-token` permission gives the action the ability to mint the OIDC token
-   permission is necessary to persist the attestation. The `attestations`
+   necessary to request a Sigstore signing certificate. The `attestations`
    permission is necessary to persist the attestation.
 
 1. Add the following to your workflow after your artifact has been built:
@@ -58,7 +58,8 @@ See [action.yml](action.yml)
 - uses: actions/attest-build-provenance@v1
   with:
     # Path to the artifact serving as the subject of the attestation. Must
-    # specify exactly one of "subject-path" or "subject-digest".
+    # specify exactly one of "subject-path" or "subject-digest". May contain a
+    # glob pattern or list of paths (total subject count cannot exceed 2500).
     subject-path:
 
     # SHA256 digest of the subject for the attestation. Must be in the form
@@ -97,6 +98,15 @@ If multiple subjects are being attested at the same time, each attestation will
 be written to the output file on a separate line (using the [JSON Lines][7]
 format).
 
+## Attestation Limits
+
+### Subject Limits
+
+No more than 2500 subjects can be attested at the same time. Subjects will be
+processed in batches 50. After the initial group of 50, each subsequent batch
+will incur an exponentially increasing amount of delay (capped at 1 minute of
+delay per batch) to avoid overwhelming the attestation API.
+
 ## Examples
 
 ### Identify Subject by Path
@@ -129,7 +139,7 @@ jobs:
           subject-path: '${{ github.workspace }}/my-app'
 ```
 
-### Identify Subjects by Wildcard
+### Identify Multiple Subjects
 
 If you are generating multiple artifacts, you can generate a provenance
 attestation for each by using a wildcard in the `subject-path` input.
@@ -142,6 +152,23 @@ attestation for each by using a wildcard in the `subject-path` input.
 
 For supported wildcards along with behavior and documentation, see
 [@actions/glob][8] which is used internally to search for files.
+
+Alternatively, you can explicitly list multiple subjects with either a comma or
+newline delimited list:
+
+```yaml
+- uses: actions/attest-build-provenance@v1
+  with:
+    subject-path: 'dist/foo, dist/bar'
+```
+
+```yaml
+- uses: actions/attest-build-provenance@v1
+  with:
+    subject-path: |
+      dist/foo
+      dist/bar
+```
 
 ### Container Image
 

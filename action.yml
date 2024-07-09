@@ -8,8 +8,9 @@ branding:
 inputs:
   subject-path:
     description: >
-      Path to the artifact for which provenance will be generated. Must specify
-      exactly one of "subject-path" or "subject-digest".
+      Path to the artifact serving as the subject of the attestation. Must
+      specify exactly one of "subject-path" or "subject-digest". May contain a
+      glob pattern or list of paths (total subject count cannot exceed 2500).
     required: false
   subject-digest:
     description: >
@@ -43,9 +44,9 @@ outputs:
 runs:
   using: 'composite'
   steps:
-    - uses: actions/attest-build-provenance/predicate@db1dde0f270afe12073070ac7aa802958ae3ec04 # predicate@1.0.0
+    - uses: actions/attest-build-provenance/predicate@46e4ff8b824dc6ae13c8f92c8ba69907e2d39b4e # predicate@1.1.0
       id: generate-build-provenance-predicate
-    - uses: actions/attest@d442d85e120905fa5821e76edb1e07a75b94ee7a # v1.1.0
+    - uses: actions/attest@7305951e905fb742188aa16c1d23409b13565e26 # v1.3.3
       id: attest
       with:
         subject-path: ${{ inputs.subject-path }}

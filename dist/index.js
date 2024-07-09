@@ -116,21 +116,15 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.signingEndpoints = exports.SIGSTORE_GITHUB = exports.SIGSTORE_PUBLIC_GOOD = void 0;
+exports.signingEndpoints = exports.SIGSTORE_PUBLIC_GOOD = void 0;
 const github = __importStar(__nccwpck_require__(95438));
 const PUBLIC_GOOD_ID = 'public-good';
 const GITHUB_ID = 'github';
 const FULCIO_PUBLIC_GOOD_URL = 'https://fulcio.sigstore.dev';
 const REKOR_PUBLIC_GOOD_URL = 'https://rekor.sigstore.dev';
-const FULCIO_INTERNAL_URL = 'https://fulcio.githubapp.com';
-const TSA_INTERNAL_URL = 'https://timestamp.githubapp.com';
 exports.SIGSTORE_PUBLIC_GOOD = {
     fulcioURL: FULCIO_PUBLIC_GOOD_URL,
     rekorURL: REKOR_PUBLIC_GOOD_URL
-};
-exports.SIGSTORE_GITHUB = {
-    fulcioURL: FULCIO_INTERNAL_URL,
-    tsaServerURL: TSA_INTERNAL_URL
 };
 const signingEndpoints = (sigstore) => {
     var _a;
@@ -150,10 +144,21 @@ const signingEndpoints = (sigstore) => {
         case PUBLIC_GOOD_ID:
             return exports.SIGSTORE_PUBLIC_GOOD;
         case GITHUB_ID:
-            return exports.SIGSTORE_GITHUB;
+            return buildGitHubEndpoints();
     }
 };
 exports.signingEndpoints = signingEndpoints;
+function buildGitHubEndpoints() {
+    const serverURL = process.env.GITHUB_SERVER_URL || 'https://github.com';
+    let host = new URL(serverURL).hostname;
+    if (host === 'github.com') {
+        host = 'githubapp.com';
+    }
+    return {
+        fulcioURL: `https://fulcio.${host}`,
+        tsaServerURL: `https://timestamp.${host}`
+    };
+}
 //# sourceMappingURL=endpoints.js.map
 
 /***/ }),
@@ -254,6 +259,7 @@ const REQUIRED_CLAIMS = [
     'sha',
     'repository',
     'event_name',
+    'job_workflow_ref',
     'workflow_ref',
     'repository_id',
     'repository_owner_id',
@@ -346,8 +352,7 @@ exports.attestProvenance = exports.buildSLSAProvenancePredicate = void 0;
 const attest_1 = __nccwpck_require__(46373);
 const oidc_1 = __nccwpck_require__(95847);
 const SLSA_PREDICATE_V1_TYPE = 'https://slsa.dev/provenance/v1';
-const GITHUB_BUILDER_ID_PREFIX = 'https://github.com/actions/runner';
-const GITHUB_BUILD_TYPE = 'https://slsa-framework.github.io/github-actions-buildtypes/workflow/v1';
+const GITHUB_BUILD_TYPE = 'https://actions.github.io/buildtypes/workflow/v1';
 const DEFAULT_ISSUER = 'https://token.actions.githubusercontent.com';
 /**
  * Builds an SLSA (Supply Chain Levels for Software Artifacts) provenance
@@ -383,7 +388,8 @@ const buildSLSAProvenancePredicate = (issuer = DEFAULT_ISSUER) => __awaiter(void
                     github: {
                         event_name: claims.event_name,
                         repository_id: claims.repository_id,
-                        repository_owner_id: claims.repository_owner_id
+                        repository_owner_id: claims.repository_owner_id,
+                        runner_environment: claims.runner_environment
                     }
                 },
                 resolvedDependencies: [
@@ -397,7 +403,7 @@ const buildSLSAProvenancePredicate = (issuer = DEFAULT_ISSUER) => __awaiter(void
             },
             runDetails: {
                 builder: {
-                    id: `${GITHUB_BUILDER_ID_PREFIX}/${claims.runner_environment}`
+                    id: `${serverURL}/${claims.job_workflow_ref}`
                 },
                 metadata: {
                     invocationId: `${serverURL}/${claims.repository}/actions/runs/${claims.run_id}/attempts/${claims.run_attempt}`
@@ -478,6 +484,7 @@ const initBundleBuilder = (opts) => {
         witnesses.push(new sign_1.RekorWitness({
             rekorBaseURL: opts.rekorURL,
             entryType: 'dsse',
+            fetchOnConflict: true,
             timeout,
             retry
         }));
@@ -11315,7 +11322,7 @@ exports.ClientTrustConfig = exports.SigningConfig = exports.TrustedRoot = export
 /* eslint-disable */
 const sigstore_common_1 = __nccwpck_require__(82193);
 function createBaseTransparencyLogInstance() {
-    return { baseUrl: "", hashAlgorithm: 0, publicKey: undefined, logId: undefined };
+    return { baseUrl: "", hashAlgorithm: 0, publicKey: undefined, logId: undefined, checkpointKeyId: undefined };
 }
 exports.TransparencyLogInstance = {
     fromJSON(object) {
@@ -11324,6 +11331,7 @@ exports.TransparencyLogInstance = {
             hashAlgorithm: isSet(object.hashAlgorithm) ? (0, sigstore_common_1.hashAlgorithmFromJSON)(object.hashAlgorithm) : 0,
             publicKey: isSet(object.publicKey) ? sigstore_common_1.PublicKey.fromJSON(object.publicKey) : undefined,
             logId: isSet(object.logId) ? sigstore_common_1.LogId.fromJSON(object.logId) : undefined,
+            checkpointKeyId: isSet(object.checkpointKeyId) ? sigstore_common_1.LogId.fromJSON(object.checkpointKeyId) : undefined,
         };
     },
     toJSON(message) {
@@ -11333,6 +11341,8 @@ exports.TransparencyLogInstance = {
         message.publicKey !== undefined &&
             (obj.publicKey = message.publicKey ? sigstore_common_1.PublicKey.toJSON(message.publicKey) : undefined);
         message.logId !== undefined && (obj.logId = message.logId ? sigstore_common_1.LogId.toJSON(message.logId) : undefined);
+        message.checkpointKeyId !== undefined &&
+            (obj.checkpointKeyId = message.checkpointKeyId ? sigstore_common_1.LogId.toJSON(message.checkpointKeyId) : undefined);
         return obj;
     },
 };
@@ -12141,8 +12151,23 @@ exports.internalError = internalError;
 
 "use strict";
 
+/*
+Copyright 2023 The Sigstore Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.checkStatus = exports.HTTPError = void 0;
+exports.HTTPError = void 0;
 class HTTPError extends Error {
     constructor({ status, message, location, }) {
         super(`(${status}) ${message}`);
@@ -12151,38 +12176,11 @@ class HTTPError extends Error {
     }
 }
 exports.HTTPError = HTTPError;
-const checkStatus = async (response) => {
-    if (response.ok) {
-        return response;
-    }
-    else {
-        let message = response.statusText;
-        const location = response.headers?.get('Location') || undefined;
-        const contentType = response.headers?.get('Content-Type');
-        // If response type is JSON, try to parse the body for a message
-        if (contentType?.includes('application/json')) {
-            try {
-                await response.json().then((body) => {
-                    message = body.message;
-                });
-            }
-            catch (e) {
-                // ignore
-            }
-        }
-        throw new HTTPError({
-            status: response.status,
-            message: message,
-            location: location,
-        });
-    }
-};
-exports.checkStatus = checkStatus;
 
 
 /***/ }),
 
-/***/ 62960:
+/***/ 78509:
 /***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
 
 "use strict";
@@ -12190,6 +12188,110 @@ exports.checkStatus = checkStatus;
 var __importDefault = (this && this.__importDefault) || function (mod) {
     return (mod && mod.__esModule) ? mod : { "default": mod };
 };
+Object.defineProperty(exports, "__esModule", ({ value: true }));
+exports.fetchWithRetry = void 0;
+/*
+Copyright 2023 The Sigstore Authors.
+
+Licensed under the Apache License, Version 2.0 (the "License");
+you may not use this file except in compliance with the License.
+You may obtain a copy of the License at
+
+    http://www.apache.org/licenses/LICENSE-2.0
+
+Unless required by applicable law or agreed to in writing, software
+distributed under the License is distributed on an "AS IS" BASIS,
+WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
+See the License for the specific language governing permissions and
+limitations under the License.
+*/
+const http2_1 = __nccwpck_require__(85158);
+const make_fetch_happen_1 = __importDefault(__nccwpck_require__(9525));
+const proc_log_1 = __nccwpck_require__(56528);
+const promise_retry_1 = __importDefault(__nccwpck_require__(54742));
+const util_1 = __nccwpck_require__(90724);
+const error_1 = __nccwpck_require__(11294);
+const { HTTP2_HEADER_LOCATION, HTTP2_HEADER_CONTENT_TYPE, HTTP2_HEADER_USER_AGENT, HTTP_STATUS_INTERNAL_SERVER_ERROR, HTTP_STATUS_TOO_MANY_REQUESTS, HTTP_STATUS_REQUEST_TIMEOUT, } = http2_1.constants;
+async function fetchWithRetry(url, options) {
+    return (0, promise_retry_1.default)(async (retry, attemptNum) => {
+        const method = options.method || 'POST';
+        const headers = {
+            [HTTP2_HEADER_USER_AGENT]: util_1.ua.getUserAgent(),
+            ...options.headers,
+        };
+        const response = await (0, make_fetch_happen_1.default)(url, {
+            method,
+            headers,
+            body: options.body,
+            timeout: options.timeout,
+            retry: false, // We're handling retries ourselves
+        }).catch((reason) => {
+            proc_log_1.log.http('fetch', `${method} ${url} attempt ${attemptNum} failed with ${reason}`);
+            return retry(reason);
+        });
+        if (response.ok) {
+            return response;
+        }
+        else {
+            const error = await errorFromResponse(response);
+            proc_log_1.log.http('fetch', `${method} ${url} attempt ${attemptNum} failed with ${response.status}`);
+            if (retryable(response.status)) {
+                return retry(error);
+            }
+            else {
+                throw error;
+            }
+        }
+    }, retryOpts(options.retry));
+}
+exports.fetchWithRetry = fetchWithRetry;
+// Translate a Response into an HTTPError instance. This will attempt to parse
+// the response body for a message, but will default to the statusText if none
+// is found.
+const errorFromResponse = async (response) => {
+    let message = response.statusText;
+    const location = response.headers?.get(HTTP2_HEADER_LOCATION) || undefined;
+    const contentType = response.headers?.get(HTTP2_HEADER_CONTENT_TYPE);
+    // If response type is JSON, try to parse the body for a message
+    if (contentType?.includes('application/json')) {
+        try {
+            const body = await response.json();
+            message = body.message || message;
+        }
+        catch (e) {
+            // ignore
+        }
+    }
+    return new error_1.HTTPError({
+        status: response.status,
+        message: message,
+        location: location,
+    });
+};
+// Determine if a status code is retryable. This includes 5xx errors, 408, and
+// 429.
+const retryable = (status) => [HTTP_STATUS_REQUEST_TIMEOUT, HTTP_STATUS_TOO_MANY_REQUESTS].includes(status) || status >= HTTP_STATUS_INTERNAL_SERVER_ERROR;
+// Normalize the retry options to the format expected by promise-retry
+const retryOpts = (retry) => {
+    if (typeof retry === 'boolean') {
+        return { retries: retry ? 1 : 0 };
+    }
+    else if (typeof retry === 'number') {
+        return { retries: retry };
+    }
+    else {
+        return { retries: 0, ...retry };
+    }
+};
+
+
+/***/ }),
+
+/***/ 62960:
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
+
+"use strict";
+
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Fulcio = void 0;
 /*
@@ -12207,33 +12309,26 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-const make_fetch_happen_1 = __importDefault(__nccwpck_require__(9525));
-const util_1 = __nccwpck_require__(90724);
-const error_1 = __nccwpck_require__(11294);
+const fetch_1 = __nccwpck_require__(78509);
 /**
  * Fulcio API client.
  */
 class Fulcio {
     constructor(options) {
-        this.fetch = make_fetch_happen_1.default.defaults({
-            retry: options.retry,
-            timeout: options.timeout,
-            headers: {
-                'Content-Type': 'application/json',
-                'User-Agent': util_1.ua.getUserAgent(),
-            },
-        });
-        this.baseUrl = options.baseURL;
+        this.options = options;
     }
     async createSigningCertificate(request) {
-        const url = `${this.baseUrl}/api/v2/signingCert`;
-        const response = await this.fetch(url, {
-            method: 'POST',
+        const { baseURL, retry, timeout } = this.options;
+        const url = `${baseURL}/api/v2/signingCert`;
+        const response = await (0, fetch_1.fetchWithRetry)(url, {
+            headers: {
+                'Content-Type': 'application/json',
+            },
             body: JSON.stringify(request),
+            timeout,
+            retry,
         });
-        await (0, error_1.checkStatus)(response);
-        const data = await response.json();
-        return data;
+        return response.json();
     }
 }
 exports.Fulcio = Fulcio;
@@ -12242,13 +12337,10 @@ exports.Fulcio = Fulcio;
 /***/ }),
 
 /***/ 56205:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Rekor = void 0;
 /*
@@ -12266,23 +12358,13 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-const make_fetch_happen_1 = __importDefault(__nccwpck_require__(9525));
-const util_1 = __nccwpck_require__(90724);
-const error_1 = __nccwpck_require__(11294);
+const fetch_1 = __nccwpck_require__(78509);
 /**
  * Rekor API client.
  */
 class Rekor {
     constructor(options) {
-        this.fetch = make_fetch_happen_1.default.defaults({
-            retry: options.retry,
-            timeout: options.timeout,
-            headers: {
-                Accept: 'application/json',
-                'User-Agent': util_1.ua.getUserAgent(),
-            },
-        });
-        this.baseUrl = options.baseURL;
+        this.options = options;
     }
     /**
      * Create a new entry in the Rekor log.
@@ -12290,13 +12372,17 @@ class Rekor {
      * @returns {Promise<Entry>} The created entry
      */
     async createEntry(propsedEntry) {
-        const url = `${this.baseUrl}/api/v1/log/entries`;
-        const response = await this.fetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
+        const { baseURL, timeout, retry } = this.options;
+        const url = `${baseURL}/api/v1/log/entries`;
+        const response = await (0, fetch_1.fetchWithRetry)(url, {
+            headers: {
+                'Content-Type': 'application/json',
+                Accept: 'application/json',
+            },
             body: JSON.stringify(propsedEntry),
+            timeout,
+            retry,
         });
-        await (0, error_1.checkStatus)(response);
         const data = await response.json();
         return entryFromResponse(data);
     }
@@ -12306,44 +12392,18 @@ class Rekor {
      * @returns {Promise<Entry>} The retrieved entry
      */
     async getEntry(uuid) {
-        const url = `${this.baseUrl}/api/v1/log/entries/${uuid}`;
-        const response = await this.fetch(url);
-        await (0, error_1.checkStatus)(response);
+        const { baseURL, timeout, retry } = this.options;
+        const url = `${baseURL}/api/v1/log/entries/${uuid}`;
+        const response = await (0, fetch_1.fetchWithRetry)(url, {
+            method: 'GET',
+            headers: {
+                Accept: 'application/json',
+            },
+            timeout,
+            retry,
+        });
         const data = await response.json();
         return entryFromResponse(data);
-    }
-    /**
-     * Search the Rekor log index for entries matching the given query.
-     * @param opts {SearchIndex} Options to search the Rekor log
-     * @returns {Promise<string[]>} UUIDs of matching entries
-     */
-    async searchIndex(opts) {
-        const url = `${this.baseUrl}/api/v1/index/retrieve`;
-        const response = await this.fetch(url, {
-            method: 'POST',
-            body: JSON.stringify(opts),
-            headers: { 'Content-Type': 'application/json' },
-        });
-        await (0, error_1.checkStatus)(response);
-        const data = await response.json();
-        return data;
-    }
-    /**
-     * Search the Rekor logs for matching the given query.
-     * @param opts {SearchLogQuery} Query to search the Rekor log
-     * @returns {Promise<Entry[]>} List of matching entries
-     */
-    async searchLog(opts) {
-        const url = `${this.baseUrl}/api/v1/log/entries/retrieve`;
-        const response = await this.fetch(url, {
-            method: 'POST',
-            body: JSON.stringify(opts),
-            headers: { 'Content-Type': 'application/json' },
-        });
-        await (0, error_1.checkStatus)(response);
-        const rawData = await response.json();
-        const data = rawData.map((d) => entryFromResponse(d));
-        return data;
     }
 }
 exports.Rekor = Rekor;
@@ -12365,13 +12425,10 @@ function entryFromResponse(data) {
 /***/ }),
 
 /***/ 82759:
-/***/ (function(__unused_webpack_module, exports, __nccwpck_require__) {
+/***/ ((__unused_webpack_module, exports, __nccwpck_require__) => {
 
 "use strict";
 
-var __importDefault = (this && this.__importDefault) || function (mod) {
-    return (mod && mod.__esModule) ? mod : { "default": mod };
-};
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.TimestampAuthority = void 0;
 /*
@@ -12389,28 +12446,22 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 */
-const make_fetch_happen_1 = __importDefault(__nccwpck_require__(9525));
-const util_1 = __nccwpck_require__(90724);
-const error_1 = __nccwpck_require__(11294);
+const fetch_1 = __nccwpck_require__(78509);
 class TimestampAuthority {
     constructor(options) {
-        this.fetch = make_fetch_happen_1.default.defaults({
-            retry: options.retry,
-            timeout: options.timeout,
-            headers: {
-                'Content-Type': 'application/json',
-                'User-Agent': util_1.ua.getUserAgent(),
-            },
-        });
-        this.baseUrl = options.baseURL;
+        this.options = options;
     }
     async createTimestamp(request) {
-        const url = `${this.baseUrl}/api/v1/timestamp`;
-        const response = await this.fetch(url, {
-            method: 'POST',
+        const { baseURL, timeout, retry } = this.options;
+        const url = `${baseURL}/api/v1/timestamp`;
+        const response = await (0, fetch_1.fetchWithRetry)(url, {
+            headers: {
+                'Content-Type': 'application/json',
+            },
             body: JSON.stringify(request),
+            timeout,
+            retry,
         });
-        await (0, error_1.checkStatus)(response);
         return response.buffer();
     }
 }
@@ -15628,7 +15679,7 @@ function readStream (cache, integrity, opts = {}) {
 module.exports.copy = copy
 
 function copy (cache, integrity, dest) {
-  return withContentSri(cache, integrity, (cpath, sri) => {
+  return withContentSri(cache, integrity, (cpath) => {
     return fs.copyFile(cpath, dest)
   })
 }
@@ -15916,7 +15967,7 @@ async function makeTmp (cache, opts) {
   }
 }
 
-async function moveToDestination (tmp, cache, sri, opts) {
+async function moveToDestination (tmp, cache, sri) {
   const destination = contentPath(cache, sri)
   const destDir = path.dirname(destination)
   if (moveOperations.has(destination)) {
@@ -16210,7 +16261,7 @@ async function bucketEntries (bucket, filter) {
   return _bucketEntries(data, filter)
 }
 
-function _bucketEntries (data, filter) {
+function _bucketEntries (data) {
   const entries = []
   data.split('\n').forEach((entry) => {
     if (!entry) {
@@ -16875,11 +16926,11 @@ async function verify (cache, opts) {
   return stats
 }
 
-async function markStartTime (cache, opts) {
+async function markStartTime () {
   return { startTime: new Date() }
 }
 
-async function markEndTime (cache, opts) {
+async function markEndTime () {
   return { endTime: new Date() }
 }
 
@@ -17020,7 +17071,7 @@ async function rebuildIndex (cache, opts) {
   return stats
 }
 
-async function rebuildBucket (cache, bucket, stats, opts) {
+async function rebuildBucket (cache, bucket, stats) {
   await truncate(bucket._path)
   // This needs to be serialized because cacache explicitly
   // lets very racy bucket conflicts clobber each other.
@@ -38972,6 +39023,8 @@ class CacheEntry {
       const cacheWritePromise = new Promise((resolve, reject) => {
         cacheWriteResolve = resolve
         cacheWriteReject = reject
+      }).catch((err) => {
+        body.emit('error', err)
       })
 
       body = new CachingMinipassPipeline({ events: ['integrity', 'size'] }, new MinipassFlush({
@@ -39726,6 +39779,7 @@ const { Minipass } = __nccwpck_require__(14968)
 const fetch = __nccwpck_require__(68998)
 const promiseRetry = __nccwpck_require__(54742)
 const ssri = __nccwpck_require__(4406)
+const { log } = __nccwpck_require__(56528)
 
 const CachingMinipassPipeline = __nccwpck_require__(61064)
 const { getAgent } = __nccwpck_require__(79907)
@@ -39813,6 +39867,8 @@ const remoteFetch = (request, options) => {
           options.onRetry(res)
         }
 
+        /* eslint-disable-next-line max-len */
+        log.http('fetch', `${req.method} ${req.url} attempt ${attemptNum} failed with ${res.status}`)
         return retryHandler(res)
       }
 
@@ -39836,6 +39892,7 @@ const remoteFetch = (request, options) => {
         options.onRetry(err)
       }
 
+      log.http('fetch', `${req.method} ${req.url} attempt ${attemptNum} failed with ${err.code}`)
       return retryHandler(err)
     }
   }, options.retry).catch((err) => {
@@ -40213,7 +40270,7 @@ class Body {
 
     // do the pipe in the promise, because the pipe() can send too much
     // data through right away and upset the MP Sized object
-    return new Promise((resolve, reject) => {
+    return new Promise((resolve) => {
       // if the stream is some other kind of stream, then pipe through a MP
       // so we can collect it more easily.
       if (stream !== upstream) {
@@ -40843,7 +40900,7 @@ const fetch = async (url, opts) => {
 
     let reqTimeout = null
     if (request.timeout) {
-      req.once('socket', socket => {
+      req.once('socket', () => {
         reqTimeout = setTimeout(() => {
           reject(new FetchError(`network timeout at: ${
             request.url}`, 'request-timeout'))
@@ -46119,6 +46176,166 @@ module.exports = async (
 		}
 	});
 };
+
+
+/***/ }),
+
+/***/ 56528:
+/***/ ((module) => {
+
+const META = Symbol('proc-log.meta')
+module.exports = {
+  META: META,
+  output: {
+    LEVELS: [
+      'standard',
+      'error',
+      'buffer',
+      'flush',
+    ],
+    KEYS: {
+      standard: 'standard',
+      error: 'error',
+      buffer: 'buffer',
+      flush: 'flush',
+    },
+    standard: function (...args) {
+      return process.emit('output', 'standard', ...args)
+    },
+    error: function (...args) {
+      return process.emit('output', 'error', ...args)
+    },
+    buffer: function (...args) {
+      return process.emit('output', 'buffer', ...args)
+    },
+    flush: function (...args) {
+      return process.emit('output', 'flush', ...args)
+    },
+  },
+  log: {
+    LEVELS: [
+      'notice',
+      'error',
+      'warn',
+      'info',
+      'verbose',
+      'http',
+      'silly',
+      'timing',
+      'pause',
+      'resume',
+    ],
+    KEYS: {
+      notice: 'notice',
+      error: 'error',
+      warn: 'warn',
+      info: 'info',
+      verbose: 'verbose',
+      http: 'http',
+      silly: 'silly',
+      timing: 'timing',
+      pause: 'pause',
+      resume: 'resume',
+    },
+    error: function (...args) {
+      return process.emit('log', 'error', ...args)
+    },
+    notice: function (...args) {
+      return process.emit('log', 'notice', ...args)
+    },
+    warn: function (...args) {
+      return process.emit('log', 'warn', ...args)
+    },
+    info: function (...args) {
+      return process.emit('log', 'info', ...args)
+    },
+    verbose: function (...args) {
+      return process.emit('log', 'verbose', ...args)
+    },
+    http: function (...args) {
+      return process.emit('log', 'http', ...args)
+    },
+    silly: function (...args) {
+      return process.emit('log', 'silly', ...args)
+    },
+    timing: function (...args) {
+      return process.emit('log', 'timing', ...args)
+    },
+    pause: function () {
+      return process.emit('log', 'pause')
+    },
+    resume: function () {
+      return process.emit('log', 'resume')
+    },
+  },
+  time: {
+    LEVELS: [
+      'start',
+      'end',
+    ],
+    KEYS: {
+      start: 'start',
+      end: 'end',
+    },
+    start: function (name, fn) {
+      process.emit('time', 'start', name)
+      function end () {
+        return process.emit('time', 'end', name)
+      }
+      if (typeof fn === 'function') {
+        const res = fn()
+        if (res && res.finally) {
+          return res.finally(end)
+        }
+        end()
+        return res
+      }
+      return end
+    },
+    end: function (name) {
+      return process.emit('time', 'end', name)
+    },
+  },
+  input: {
+    LEVELS: [
+      'start',
+      'end',
+      'read',
+    ],
+    KEYS: {
+      start: 'start',
+      end: 'end',
+      read: 'read',
+    },
+    start: function (fn) {
+      process.emit('input', 'start')
+      function end () {
+        return process.emit('input', 'end')
+      }
+      if (typeof fn === 'function') {
+        const res = fn()
+        if (res && res.finally) {
+          return res.finally(end)
+        }
+        end()
+        return res
+      }
+      return end
+    },
+    end: function () {
+      return process.emit('input', 'end')
+    },
+    read: function (...args) {
+      let resolve, reject
+      const promise = new Promise((_resolve, _reject) => {
+        resolve = _resolve
+        reject = _reject
+      })
+      process.emit('input', 'read', resolve, reject, ...args)
+      return promise
+    },
+  },
+}
 
 
 /***/ }),
@@ -53318,7 +53535,7 @@ function createIntegrity (opts) {
       hashes.forEach(h => h.update(chunk, enc))
       return this
     },
-    digest: function (enc) {
+    digest: function () {
       const integrity = algorithms.reduce((acc, algo) => {
         const digest = hashes.shift().digest('base64')
         const hash = new Hash(
@@ -76722,7 +76939,7 @@ var __importStar = (this && this.__importStar) || function (mod) {
     return result;
 };
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.run = void 0;
+exports.run = run;
 const attest_1 = __nccwpck_require__(74113);
 const core = __importStar(__nccwpck_require__(42186));
 /**
@@ -76742,7 +76959,6 @@ async function run() {
         core.setFailed(error.message);
     }
 }
-exports.run = run;
 
 
 /***/ }),
@@ -76867,11 +77083,51 @@ module.exports = require("node:events");
 
 /***/ }),
 
+/***/ 87561:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:fs");
+
+/***/ }),
+
+/***/ 93977:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:fs/promises");
+
+/***/ }),
+
+/***/ 49411:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:path");
+
+/***/ }),
+
 /***/ 84492:
 /***/ ((module) => {
 
 "use strict";
 module.exports = require("node:stream");
+
+/***/ }),
+
+/***/ 76915:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:string_decoder");
+
+/***/ }),
+
+/***/ 41041:
+/***/ ((module) => {
+
+"use strict";
+module.exports = require("node:url");
 
 /***/ }),
 
@@ -80083,16 +80339,16 @@ exports.LRUCache = LRUCache;
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Glob = void 0;
 const minimatch_1 = __nccwpck_require__(70655);
+const node_url_1 = __nccwpck_require__(41041);
 const path_scurry_1 = __nccwpck_require__(51081);
-const url_1 = __nccwpck_require__(57310);
 const pattern_js_1 = __nccwpck_require__(92895);
 const walker_js_1 = __nccwpck_require__(45548);
 // if no process global, just call it linux.
 // so we default to case-sensitive, / separators
-const defaultPlatform = typeof process === 'object' &&
+const defaultPlatform = (typeof process === 'object' &&
     process &&
-    typeof process.platform === 'string'
-    ? process.platform
+    typeof process.platform === 'string') ?
+    process.platform
     : 'linux';
 /**
  * An object that can perform glob pattern traversals.
@@ -80122,6 +80378,7 @@ class Glob {
     signal;
     windowsPathsNoEscape;
     withFileTypes;
+    includeChildMatches;
     /**
      * The options provided to the constructor.
      */
@@ -80158,7 +80415,7 @@ class Glob {
             this.cwd = '';
         }
         else if (opts.cwd instanceof URL || opts.cwd.startsWith('file://')) {
-            opts.cwd = (0, url_1.fileURLToPath)(opts.cwd);
+            opts.cwd = (0, node_url_1.fileURLToPath)(opts.cwd);
         }
         this.cwd = opts.cwd || '';
         this.root = opts.root;
@@ -80167,6 +80424,7 @@ class Glob {
         this.noext = !!opts.noext;
         this.realpath = !!opts.realpath;
         this.absolute = opts.absolute;
+        this.includeChildMatches = opts.includeChildMatches !== false;
         this.noglobstar = !!opts.noglobstar;
         this.matchBase = !!opts.matchBase;
         this.maxDepth =
@@ -80181,7 +80439,8 @@ class Glob {
         }
         this.windowsPathsNoEscape =
             !!opts.windowsPathsNoEscape ||
-                opts.allowWindowsEscape === false;
+                opts.allowWindowsEscape ===
+                    false;
         if (this.windowsPathsNoEscape) {
             pattern = pattern.map(p => p.replace(/\\/g, '/'));
         }
@@ -80202,12 +80461,9 @@ class Glob {
             }
         }
         else {
-            const Scurry = opts.platform === 'win32'
-                ? path_scurry_1.PathScurryWin32
-                : opts.platform === 'darwin'
-                    ? path_scurry_1.PathScurryDarwin
-                    : opts.platform
-                        ? path_scurry_1.PathScurryPosix
+            const Scurry = opts.platform === 'win32' ? path_scurry_1.PathScurryWin32
+                : opts.platform === 'darwin' ? path_scurry_1.PathScurryDarwin
+                    : opts.platform ? path_scurry_1.PathScurryPosix
                         : path_scurry_1.PathScurry;
             this.scurry = new Scurry(this.cwd, {
                 nocase: opts.nocase,
@@ -80259,11 +80515,12 @@ class Glob {
         return [
             ...(await new walker_js_1.GlobWalker(this.patterns, this.scurry.cwd, {
                 ...this.opts,
-                maxDepth: this.maxDepth !== Infinity
-                    ? this.maxDepth + this.scurry.cwd.depth()
+                maxDepth: this.maxDepth !== Infinity ?
+                    this.maxDepth + this.scurry.cwd.depth()
                     : Infinity,
                 platform: this.platform,
                 nocase: this.nocase,
+                includeChildMatches: this.includeChildMatches,
             }).walk()),
         ];
     }
@@ -80271,32 +80528,35 @@ class Glob {
         return [
             ...new walker_js_1.GlobWalker(this.patterns, this.scurry.cwd, {
                 ...this.opts,
-                maxDepth: this.maxDepth !== Infinity
-                    ? this.maxDepth + this.scurry.cwd.depth()
+                maxDepth: this.maxDepth !== Infinity ?
+                    this.maxDepth + this.scurry.cwd.depth()
                     : Infinity,
                 platform: this.platform,
                 nocase: this.nocase,
+                includeChildMatches: this.includeChildMatches,
             }).walkSync(),
         ];
     }
     stream() {
         return new walker_js_1.GlobStream(this.patterns, this.scurry.cwd, {
             ...this.opts,
-            maxDepth: this.maxDepth !== Infinity
-                ? this.maxDepth + this.scurry.cwd.depth()
+            maxDepth: this.maxDepth !== Infinity ?
+                this.maxDepth + this.scurry.cwd.depth()
                 : Infinity,
             platform: this.platform,
             nocase: this.nocase,
+            includeChildMatches: this.includeChildMatches,
         }).stream();
     }
     streamSync() {
         return new walker_js_1.GlobStream(this.patterns, this.scurry.cwd, {
             ...this.opts,
-            maxDepth: this.maxDepth !== Infinity
-                ? this.maxDepth + this.scurry.cwd.depth()
+            maxDepth: this.maxDepth !== Infinity ?
+                this.maxDepth + this.scurry.cwd.depth()
                 : Infinity,
             platform: this.platform,
             nocase: this.nocase,
+            includeChildMatches: this.includeChildMatches,
         }).streamSync();
     }
     /**
@@ -80372,10 +80632,10 @@ Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.Ignore = void 0;
 const minimatch_1 = __nccwpck_require__(70655);
 const pattern_js_1 = __nccwpck_require__(92895);
-const defaultPlatform = typeof process === 'object' &&
+const defaultPlatform = (typeof process === 'object' &&
     process &&
-    typeof process.platform === 'string'
-    ? process.platform
+    typeof process.platform === 'string') ?
+    process.platform
     : 'linux';
 /**
  * Class used to process ignored patterns
@@ -80385,12 +80645,15 @@ class Ignore {
     relativeChildren;
     absolute;
     absoluteChildren;
+    platform;
+    mmopts;
     constructor(ignored, { nobrace, nocase, noext, noglobstar, platform = defaultPlatform, }) {
         this.relative = [];
         this.absolute = [];
         this.relativeChildren = [];
         this.absoluteChildren = [];
-        const mmopts = {
+        this.platform = platform;
+        this.mmopts = {
             dot: true,
             nobrace,
             nocase,
@@ -80401,6 +80664,10 @@ class Ignore {
             nocomment: true,
             nonegate: true,
         };
+        for (const ign of ignored)
+            this.add(ign);
+    }
+    add(ign) {
         // this is a little weird, but it gives us a clean set of optimized
         // minimatch matchers, without getting tripped up if one of them
         // ends in /** inside a brace section, and it's only inefficient at
@@ -80413,36 +80680,34 @@ class Ignore {
         // for absolute-ness.
         // Yet another way, Minimatch could take an array of glob strings, and
         // a cwd option, and do the right thing.
-        for (const ign of ignored) {
-            const mm = new minimatch_1.Minimatch(ign, mmopts);
-            for (let i = 0; i < mm.set.length; i++) {
-                const parsed = mm.set[i];
-                const globParts = mm.globParts[i];
-                /* c8 ignore start */
-                if (!parsed || !globParts) {
-                    throw new Error('invalid pattern object');
-                }
-                // strip off leading ./ portions
-                // https://github.com/isaacs/node-glob/issues/570
-                while (parsed[0] === '.' && globParts[0] === '.') {
-                    parsed.shift();
-                    globParts.shift();
-                }
-                /* c8 ignore stop */
-                const p = new pattern_js_1.Pattern(parsed, globParts, 0, platform);
-                const m = new minimatch_1.Minimatch(p.globString(), mmopts);
-                const children = globParts[globParts.length - 1] === '**';
-                const absolute = p.isAbsolute();
+        const mm = new minimatch_1.Minimatch(ign, this.mmopts);
+        for (let i = 0; i < mm.set.length; i++) {
+            const parsed = mm.set[i];
+            const globParts = mm.globParts[i];
+            /* c8 ignore start */
+            if (!parsed || !globParts) {
+                throw new Error('invalid pattern object');
+            }
+            // strip off leading ./ portions
+            // https://github.com/isaacs/node-glob/issues/570
+            while (parsed[0] === '.' && globParts[0] === '.') {
+                parsed.shift();
+                globParts.shift();
+            }
+            /* c8 ignore stop */
+            const p = new pattern_js_1.Pattern(parsed, globParts, 0, this.platform);
+            const m = new minimatch_1.Minimatch(p.globString(), this.mmopts);
+            const children = globParts[globParts.length - 1] === '**';
+            const absolute = p.isAbsolute();
+            if (absolute)
+                this.absolute.push(m);
+            else
+                this.relative.push(m);
+            if (children) {
                 if (absolute)
-                    this.absolute.push(m);
+                    this.absoluteChildren.push(m);
                 else
-                    this.relative.push(m);
-                if (children) {
-                    if (absolute)
-                        this.absoluteChildren.push(m);
-                    else
-                        this.relativeChildren.push(m);
-                }
+                    this.relativeChildren.push(m);
             }
         }
     }
@@ -80486,10 +80751,19 @@ exports.Ignore = Ignore;
 "use strict";
 
 Object.defineProperty(exports, "__esModule", ({ value: true }));
-exports.glob = exports.hasMagic = exports.Glob = exports.unescape = exports.escape = exports.sync = exports.iterate = exports.iterateSync = exports.stream = exports.streamSync = exports.globIterate = exports.globIterateSync = exports.globSync = exports.globStream = exports.globStreamSync = void 0;
+exports.glob = exports.sync = exports.iterate = exports.iterateSync = exports.stream = exports.streamSync = exports.globIterate = exports.globIterateSync = exports.globSync = exports.globStream = exports.globStreamSync = exports.Ignore = exports.hasMagic = exports.Glob = exports.unescape = exports.escape = void 0;
 const minimatch_1 = __nccwpck_require__(70655);
 const glob_js_1 = __nccwpck_require__(55339);
 const has_magic_js_1 = __nccwpck_require__(96490);
+var minimatch_2 = __nccwpck_require__(70655);
+Object.defineProperty(exports, "escape", ({ enumerable: true, get: function () { return minimatch_2.escape; } }));
+Object.defineProperty(exports, "unescape", ({ enumerable: true, get: function () { return minimatch_2.unescape; } }));
+var glob_js_2 = __nccwpck_require__(55339);
+Object.defineProperty(exports, "Glob", ({ enumerable: true, get: function () { return glob_js_2.Glob; } }));
+var has_magic_js_2 = __nccwpck_require__(96490);
+Object.defineProperty(exports, "hasMagic", ({ enumerable: true, get: function () { return has_magic_js_2.hasMagic; } }));
+var ignore_js_1 = __nccwpck_require__(50750);
+Object.defineProperty(exports, "Ignore", ({ enumerable: true, get: function () { return ignore_js_1.Ignore; } }));
 function globStreamSync(pattern, options = {}) {
     return new glob_js_1.Glob(pattern, options).streamSync();
 }
@@ -80524,15 +80798,6 @@ exports.sync = Object.assign(globSync, {
     stream: globStreamSync,
     iterate: globIterateSync,
 });
-/* c8 ignore start */
-var minimatch_2 = __nccwpck_require__(70655);
-Object.defineProperty(exports, "escape", ({ enumerable: true, get: function () { return minimatch_2.escape; } }));
-Object.defineProperty(exports, "unescape", ({ enumerable: true, get: function () { return minimatch_2.unescape; } }));
-var glob_js_2 = __nccwpck_require__(55339);
-Object.defineProperty(exports, "Glob", ({ enumerable: true, get: function () { return glob_js_2.Glob; } }));
-var has_magic_js_2 = __nccwpck_require__(96490);
-Object.defineProperty(exports, "hasMagic", ({ enumerable: true, get: function () { return has_magic_js_2.hasMagic; } }));
-/* c8 ignore stop */
 exports.glob = Object.assign(glob_, {
     glob: glob_,
     globSync,
@@ -80671,9 +80936,9 @@ class Pattern {
     globString() {
         return (this.#globString =
             this.#globString ||
-                (this.#index === 0
-                    ? this.isAbsolute()
-                        ? this.#globList[0] + this.#globList.slice(1).join('/')
+                (this.#index === 0 ?
+                    this.isAbsolute() ?
+                        this.#globList[0] + this.#globList.slice(1).join('/')
                         : this.#globList.join('/')
                     : this.#globList.slice(this.#index).join('/')));
     }
@@ -80702,8 +80967,8 @@ class Pattern {
      */
     isUNC() {
         const pl = this.#patternList;
-        return this.#isUNC !== undefined
-            ? this.#isUNC
+        return this.#isUNC !== undefined ?
+            this.#isUNC
             : (this.#isUNC =
                 this.#platform === 'win32' &&
                     this.#index === 0 &&
@@ -80724,8 +80989,8 @@ class Pattern {
      */
     isDrive() {
         const pl = this.#patternList;
-        return this.#isDrive !== undefined
-            ? this.#isDrive
+        return this.#isDrive !== undefined ?
+            this.#isDrive
             : (this.#isDrive =
                 this.#platform === 'win32' &&
                     this.#index === 0 &&
@@ -80741,8 +81006,8 @@ class Pattern {
      */
     isAbsolute() {
         const pl = this.#patternList;
-        return this.#isAbsolute !== undefined
-            ? this.#isAbsolute
+        return this.#isAbsolute !== undefined ?
+            this.#isAbsolute
             : (this.#isAbsolute =
                 (pl[0] === '' && pl.length > 1) ||
                     this.isDrive() ||
@@ -80753,8 +81018,8 @@ class Pattern {
      */
     root() {
         const p = this.#patternList[0];
-        return typeof p === 'string' && this.isAbsolute() && this.#index === 0
-            ? p
+        return (typeof p === 'string' && this.isAbsolute() && this.#index === 0) ?
+            p
             : '';
     }
     /**
@@ -80890,9 +81155,8 @@ class Processor {
         this.opts = opts;
         this.follow = !!opts.follow;
         this.dot = !!opts.dot;
-        this.hasWalkedCache = hasWalkedCache
-            ? hasWalkedCache.copy()
-            : new HasWalkedCache();
+        this.hasWalkedCache =
+            hasWalkedCache ? hasWalkedCache.copy() : new HasWalkedCache();
     }
     processPatterns(target, patterns) {
         this.patterns = patterns;
@@ -80905,8 +81169,8 @@ class Processor {
             const absolute = pattern.isAbsolute() && this.opts.absolute !== false;
             // start absolute patterns at root
             if (root) {
-                t = t.resolve(root === '/' && this.opts.root !== undefined
-                    ? this.opts.root
+                t = t.resolve(root === '/' && this.opts.root !== undefined ?
+                    this.opts.root
                     : root);
                 const rest = pattern.rest();
                 if (!rest) {
@@ -81106,10 +81370,8 @@ exports.GlobStream = exports.GlobWalker = exports.GlobUtil = void 0;
 const minipass_1 = __nccwpck_require__(14968);
 const ignore_js_1 = __nccwpck_require__(50750);
 const processor_js_1 = __nccwpck_require__(62813);
-const makeIgnore = (ignore, opts) => typeof ignore === 'string'
-    ? new ignore_js_1.Ignore([ignore], opts)
-    : Array.isArray(ignore)
-        ? new ignore_js_1.Ignore(ignore, opts)
+const makeIgnore = (ignore, opts) => typeof ignore === 'string' ? new ignore_js_1.Ignore([ignore], opts)
+    : Array.isArray(ignore) ? new ignore_js_1.Ignore(ignore, opts)
         : ignore;
 /**
  * basic walking utilities that all the glob walker types use
@@ -81126,13 +81388,20 @@ class GlobUtil {
     #sep;
     signal;
     maxDepth;
+    includeChildMatches;
     constructor(patterns, path, opts) {
         this.patterns = patterns;
         this.path = path;
         this.opts = opts;
         this.#sep = !opts.posix && opts.platform === 'win32' ? '\\' : '/';
-        if (opts.ignore) {
-            this.#ignore = makeIgnore(opts.ignore, opts);
+        this.includeChildMatches = opts.includeChildMatches !== false;
+        if (opts.ignore || !this.includeChildMatches) {
+            this.#ignore = makeIgnore(opts.ignore ?? [], opts);
+            if (!this.includeChildMatches &&
+                typeof this.#ignore.add !== 'function') {
+                const m = 'cannot ignore child matches, ignore lacks add() method.';
+                throw new Error(m);
+            }
         }
         // ignore, always set with maxDepth, but it's optional on the
         // GlobOptions type
@@ -81204,7 +81473,7 @@ class GlobUtil {
         return this.matchCheckTest(s, ifDir);
     }
     matchCheckTest(e, ifDir) {
-        return e &&
+        return (e &&
             (this.maxDepth === Infinity || e.depth() <= this.maxDepth) &&
             (!ifDir || e.canReaddir()) &&
             (!this.opts.nodir || !e.isDirectory()) &&
@@ -81212,8 +81481,8 @@ class GlobUtil {
                 !this.opts.follow ||
                 !e.isSymbolicLink() ||
                 !e.realpathCached()?.isDirectory()) &&
-            !this.#ignored(e)
-            ? e
+            !this.#ignored(e)) ?
+            e
             : undefined;
     }
     matchCheckSync(e, ifDir) {
@@ -81239,6 +81508,11 @@ class GlobUtil {
     matchFinish(e, absolute) {
         if (this.#ignored(e))
             return;
+        // we know we have an ignore if this is false, but TS doesn't
+        if (!this.includeChildMatches && this.#ignore?.add) {
+            const ign = `${e.relativePosix()}/**`;
+            this.#ignore.add(ign);
+        }
         const abs = this.opts.absolute === undefined ? absolute : this.opts.absolute;
         this.seen.add(e);
         const mark = this.opts.mark && e.isDirectory() ? this.#sep : '';
@@ -81252,8 +81526,8 @@ class GlobUtil {
         }
         else {
             const rel = this.opts.posix ? e.relativePosix() : e.relative();
-            const pre = this.opts.dotRelative && !rel.startsWith('..' + this.#sep)
-                ? '.' + this.#sep
+            const pre = this.opts.dotRelative && !rel.startsWith('..' + this.#sep) ?
+                '.' + this.#sep
                 : '';
             this.matchEmit(!rel ? '.' + mark : pre + rel + mark);
         }
@@ -81393,10 +81667,9 @@ class GlobUtil {
 }
 exports.GlobUtil = GlobUtil;
 class GlobWalker extends GlobUtil {
-    matches;
+    matches = new Set();
     constructor(patterns, path, opts) {
         super(patterns, path, opts);
-        this.matches = new Set();
     }
     matchEmit(e) {
         this.matches.add(e);
@@ -84806,9 +85079,9 @@ const proc = typeof process === 'object' && process
         stdout: null,
         stderr: null,
     };
-const events_1 = __nccwpck_require__(82361);
-const stream_1 = __importDefault(__nccwpck_require__(12781));
-const string_decoder_1 = __nccwpck_require__(71576);
+const node_events_1 = __nccwpck_require__(15673);
+const node_stream_1 = __importDefault(__nccwpck_require__(84492));
+const node_string_decoder_1 = __nccwpck_require__(76915);
 /**
  * Return true if the argument is a Minipass stream, Node stream, or something
  * else that Minipass can interact with.
@@ -84816,7 +85089,7 @@ const string_decoder_1 = __nccwpck_require__(71576);
 const isStream = (s) => !!s &&
     typeof s === 'object' &&
     (s instanceof Minipass ||
-        s instanceof stream_1.default ||
+        s instanceof node_stream_1.default ||
         (0, exports.isReadable)(s) ||
         (0, exports.isWritable)(s));
 exports.isStream = isStream;
@@ -84825,17 +85098,17 @@ exports.isStream = isStream;
  */
 const isReadable = (s) => !!s &&
     typeof s === 'object' &&
-    s instanceof events_1.EventEmitter &&
+    s instanceof node_events_1.EventEmitter &&
     typeof s.pipe === 'function' &&
     // node core Writable streams have a pipe() method, but it throws
-    s.pipe !== stream_1.default.Writable.prototype.pipe;
+    s.pipe !== node_stream_1.default.Writable.prototype.pipe;
 exports.isReadable = isReadable;
 /**
  * Return true if the argument is a valid {@link Minipass.Writable}
  */
 const isWritable = (s) => !!s &&
     typeof s === 'object' &&
-    s instanceof events_1.EventEmitter &&
+    s instanceof node_events_1.EventEmitter &&
     typeof s.write === 'function' &&
     typeof s.end === 'function';
 exports.isWritable = isWritable;
@@ -84942,7 +85215,7 @@ const isEncodingOptions = (o) => !o.objectMode && !!o.encoding && o.encoding !==
  * `Events` is the set of event handler signatures that this object
  * will emit, see {@link Minipass.Events}
  */
-class Minipass extends events_1.EventEmitter {
+class Minipass extends node_events_1.EventEmitter {
     [FLOWING] = false;
     [PAUSED] = false;
     [PIPES] = [];
@@ -84997,7 +85270,7 @@ class Minipass extends events_1.EventEmitter {
         }
         this[ASYNC] = !!options.async;
         this[DECODER] = this[ENCODING]
-            ? new string_decoder_1.StringDecoder(this[ENCODING])
+            ? new node_string_decoder_1.StringDecoder(this[ENCODING])
             : null;
         //@ts-ignore - private option for debugging and testing
         if (options && options.debugExposeBuffer === true) {
@@ -85856,14 +86129,14 @@ var __importStar = (this && this.__importStar) || function (mod) {
 Object.defineProperty(exports, "__esModule", ({ value: true }));
 exports.PathScurry = exports.Path = exports.PathScurryDarwin = exports.PathScurryPosix = exports.PathScurryWin32 = exports.PathScurryBase = exports.PathPosix = exports.PathWin32 = exports.PathBase = exports.ChildrenCache = exports.ResolveCache = void 0;
 const lru_cache_1 = __nccwpck_require__(66091);
-const path_1 = __nccwpck_require__(71017);
-const url_1 = __nccwpck_require__(57310);
-const actualFS = __importStar(__nccwpck_require__(57147));
+const node_path_1 = __nccwpck_require__(49411);
+const node_url_1 = __nccwpck_require__(41041);
 const fs_1 = __nccwpck_require__(57147);
+const actualFS = __importStar(__nccwpck_require__(87561));
 const realpathSync = fs_1.realpathSync.native;
 // TODO: test perf of fs/promises realpath vs realpathCB,
 // since the promises one uses realpath.native
-const promises_1 = __nccwpck_require__(73292);
+const promises_1 = __nccwpck_require__(93977);
 const minipass_1 = __nccwpck_require__(14968);
 const defaultFS = {
     lstatSync: fs_1.lstatSync,
@@ -85879,8 +86152,8 @@ const defaultFS = {
     },
 };
 // if they just gave us require('fs') then use our default
-const fsFromOption = (fsOption) => !fsOption || fsOption === defaultFS || fsOption === actualFS
-    ? defaultFS
+const fsFromOption = (fsOption) => !fsOption || fsOption === defaultFS || fsOption === actualFS ?
+    defaultFS
     : {
         ...defaultFS,
         ...fsOption,
@@ -85921,20 +86194,13 @@ const ENOREADLINK = 0b0001_0000_0000;
 const ENOREALPATH = 0b0010_0000_0000;
 const ENOCHILD = ENOTDIR | ENOENT | ENOREALPATH;
 const TYPEMASK = 0b0011_1111_1111;
-const entToType = (s) => s.isFile()
-    ? IFREG
-    : s.isDirectory()
-        ? IFDIR
-        : s.isSymbolicLink()
-            ? IFLNK
-            : s.isCharacterDevice()
-                ? IFCHR
-                : s.isBlockDevice()
-                    ? IFBLK
-                    : s.isSocket()
-                        ? IFSOCK
-                        : s.isFIFO()
-                            ? IFIFO
+const entToType = (s) => s.isFile() ? IFREG
+    : s.isDirectory() ? IFDIR
+        : s.isSymbolicLink() ? IFLNK
+            : s.isCharacterDevice() ? IFCHR
+                : s.isBlockDevice() ? IFBLK
+                    : s.isSocket() ? IFSOCK
+                        : s.isFIFO() ? IFIFO
                             : UNKNOWN;
 // normalize unicode path names
 const normalizeCache = new Map();
@@ -86038,6 +86304,11 @@ class PathBase {
      * @internal
      */
     nocase;
+    /**
+     * boolean indicating that this path is the current working directory
+     * of the PathScurry collection that contains it.
+     */
+    isCWD = false;
     // potential default fs override
     #fs;
     // Stats fields
@@ -86125,13 +86396,19 @@ class PathBase {
     #realpath;
     /**
      * This property is for compatibility with the Dirent class as of
-     * Node v20, where Dirent['path'] refers to the path of the directory
-     * that was passed to readdir.  So, somewhat counterintuitively, this
-     * property refers to the *parent* path, not the path object itself.
-     * For root entries, it's the path to the entry itself.
+     * Node v20, where Dirent['parentPath'] refers to the path of the
+     * directory that was passed to readdir. For root entries, it's the path
+     * to the entry itself.
+     */
+    get parentPath() {
+        return (this.parent || this).fullpath();
+    }
+    /**
+     * Deprecated alias for Dirent['parentPath'] Somewhat counterintuitively,
+     * this property refers to the *parent* path, not the path object itself.
      */
     get path() {
-        return (this.parent || this).fullpath();
+        return this.parentPath;
     }
     /**
      * Do not create new Path objects directly.  They should always be accessed
@@ -86186,8 +86463,8 @@ class PathBase {
         const rootPath = this.getRootString(path);
         const dir = path.substring(rootPath.length);
         const dirParts = dir.split(this.splitSep);
-        const result = rootPath
-            ? this.getRoot(rootPath).#resolveParts(dirParts)
+        const result = rootPath ?
+            this.getRoot(rootPath).#resolveParts(dirParts)
             : this.#resolveParts(dirParts);
         return result;
     }
@@ -86238,9 +86515,7 @@ class PathBase {
         }
         // find the child
         const children = this.children();
-        const name = this.nocase
-            ? normalizeNocase(pathPart)
-            : normalize(pathPart);
+        const name = this.nocase ? normalizeNocase(pathPart) : normalize(pathPart);
         for (const p of children) {
             if (p.#matchName === name) {
                 return p;
@@ -86250,9 +86525,7 @@ class PathBase {
         // actually exist.  If we know the parent isn't a dir, then
         // in fact it CAN'T exist.
         const s = this.parent ? this.sep : '';
-        const fullpath = this.#fullpath
-            ? this.#fullpath + s + pathPart
-            : undefined;
+        const fullpath = this.#fullpath ? this.#fullpath + s + pathPart : undefined;
         const pchild = this.newChild(pathPart, UNKNOWN, {
             ...opts,
             parent: this,
@@ -86271,6 +86544,8 @@ class PathBase {
      * the cwd, then this ends up being equivalent to the fullpath()
      */
     relative() {
+        if (this.isCWD)
+            return '';
         if (this.#relative !== undefined) {
             return this.#relative;
         }
@@ -86291,6 +86566,8 @@ class PathBase {
     relativePosix() {
         if (this.sep === '/')
             return this.relative();
+        if (this.isCWD)
+            return '';
         if (this.#relativePosix !== undefined)
             return this.#relativePosix;
         const name = this.name;
@@ -86356,23 +86633,15 @@ class PathBase {
         return this[`is${type}`]();
     }
     getType() {
-        return this.isUnknown()
-            ? 'Unknown'
-            : this.isDirectory()
-                ? 'Directory'
-                : this.isFile()
-                    ? 'File'
-                    : this.isSymbolicLink()
-                        ? 'SymbolicLink'
-                        : this.isFIFO()
-                            ? 'FIFO'
-                            : this.isCharacterDevice()
-                                ? 'CharacterDevice'
-                                : this.isBlockDevice()
-                                    ? 'BlockDevice'
-                                    : /* c8 ignore start */ this.isSocket()
-                                        ? 'Socket'
-                                        : 'Unknown';
+        return (this.isUnknown() ? 'Unknown'
+            : this.isDirectory() ? 'Directory'
+                : this.isFile() ? 'File'
+                    : this.isSymbolicLink() ? 'SymbolicLink'
+                        : this.isFIFO() ? 'FIFO'
+                            : this.isCharacterDevice() ? 'CharacterDevice'
+                                : this.isBlockDevice() ? 'BlockDevice'
+                                    : /* c8 ignore start */ this.isSocket() ? 'Socket'
+                                        : 'Unknown');
         /* c8 ignore stop */
     }
     /**
@@ -86506,8 +86775,8 @@ class PathBase {
      * directly.
      */
     isNamed(n) {
-        return !this.nocase
-            ? this.#matchName === normalize(n)
+        return !this.nocase ?
+            this.#matchName === normalize(n)
             : this.#matchName === normalizeNocase(n);
     }
     /**
@@ -86563,7 +86832,7 @@ class PathBase {
         /* c8 ignore stop */
         try {
             const read = this.#fs.readlinkSync(this.fullpath());
-            const linkTarget = (this.parent.realpathSync())?.resolve(read);
+            const linkTarget = this.parent.realpathSync()?.resolve(read);
             if (linkTarget) {
                 return (this.#linkTarget = linkTarget);
             }
@@ -86684,9 +86953,7 @@ class PathBase {
     #readdirMaybePromoteChild(e, c) {
         for (let p = c.provisional; p < c.length; p++) {
             const pchild = c[p];
-            const name = this.nocase
-                ? normalizeNocase(e.name)
-                : normalize(e.name);
+            const name = this.nocase ? normalizeNocase(e.name) : normalize(e.name);
             if (name !== pchild.#matchName) {
                 continue;
             }
@@ -86985,6 +87252,8 @@ class PathBase {
     [setAsCwd](oldCwd) {
         if (oldCwd === this)
             return;
+        oldCwd.isCWD = false;
+        this.isCWD = true;
         const changed = new Set([]);
         let rp = [];
         let p = this;
@@ -87039,7 +87308,7 @@ class PathWin32 extends PathBase {
      * @internal
      */
     getRootString(path) {
-        return path_1.win32.parse(path).root;
+        return node_path_1.win32.parse(path).root;
     }
     /**
      * @internal
@@ -87161,7 +87430,7 @@ class PathScurryBase {
     constructor(cwd = process.cwd(), pathImpl, sep, { nocase, childrenCacheSize = 16 * 1024, fs = defaultFS, } = {}) {
         this.#fs = fsFromOption(fs);
         if (cwd instanceof URL || cwd.startsWith('file://')) {
-            cwd = (0, url_1.fileURLToPath)(cwd);
+            cwd = (0, node_url_1.fileURLToPath)(cwd);
         }
         // resolve and split root, and then add to the store.
         // this is the only time we call path.resolve()
@@ -87750,7 +88019,7 @@ class PathScurryWin32 extends PathScurryBase {
     sep = '\\';
     constructor(cwd = process.cwd(), opts = {}) {
         const { nocase = true } = opts;
-        super(cwd, path_1.win32, '\\', { ...opts, nocase });
+        super(cwd, node_path_1.win32, '\\', { ...opts, nocase });
         this.nocase = nocase;
         for (let p = this.cwd; p; p = p.parent) {
             p.nocase = this.nocase;
@@ -87763,7 +88032,7 @@ class PathScurryWin32 extends PathScurryBase {
         // if the path starts with a single separator, it's not a UNC, and we'll
         // just get separator as the root, and driveFromUNC will return \
         // In that case, mount \ on the root from the cwd.
-        return path_1.win32.parse(dir).root.toUpperCase();
+        return node_path_1.win32.parse(dir).root.toUpperCase();
     }
     /**
      * @internal
@@ -87793,7 +88062,7 @@ class PathScurryPosix extends PathScurryBase {
     sep = '/';
     constructor(cwd = process.cwd(), opts = {}) {
         const { nocase = false } = opts;
-        super(cwd, path_1.posix, '/', { ...opts, nocase });
+        super(cwd, node_path_1.posix, '/', { ...opts, nocase });
         this.nocase = nocase;
     }
     /**
@@ -87843,10 +88112,8 @@ exports.Path = process.platform === 'win32' ? PathWin32 : PathPosix;
  * {@link PathScurryWin32} on Windows systems, {@link PathScurryDarwin} on
  * Darwin (macOS) systems, {@link PathScurryPosix} on all others.
  */
-exports.PathScurry = process.platform === 'win32'
-    ? PathScurryWin32
-    : process.platform === 'darwin'
-        ? PathScurryDarwin
+exports.PathScurry = process.platform === 'win32' ? PathScurryWin32
+    : process.platform === 'darwin' ? PathScurryDarwin
         : PathScurryPosix;
 //# sourceMappingURL=index.js.map
 
@@ -89309,7 +89576,7 @@ exports.LRUCache = LRUCache;
 /***/ ((module) => {
 
 "use strict";
-module.exports = {"i8":"2.3.0"};
+module.exports = {"i8":"2.3.2"};
 
 /***/ }),
 
@@ -89389,7 +89656,7 @@ module.exports = JSON.parse('[["0","\\u0000",128],["a1","｡",62],["8140","　�
 /***/ ((module) => {
 
 "use strict";
-module.exports = JSON.parse('{"name":"make-fetch-happen","version":"13.0.0","description":"Opinionated, caching, retrying fetch client","main":"lib/index.js","files":["bin/","lib/"],"scripts":{"test":"tap","posttest":"npm run lint","eslint":"eslint","lint":"eslint \\"**/*.js\\"","lintfix":"npm run lint -- --fix","postlint":"template-oss-check","snap":"tap","template-oss-apply":"template-oss-apply --force"},"repository":{"type":"git","url":"https://github.com/npm/make-fetch-happen.git"},"keywords":["http","request","fetch","mean girls","caching","cache","subresource integrity"],"author":"GitHub Inc.","license":"ISC","dependencies":{"@npmcli/agent":"^2.0.0","cacache":"^18.0.0","http-cache-semantics":"^4.1.1","is-lambda":"^1.0.1","minipass":"^7.0.2","minipass-fetch":"^3.0.0","minipass-flush":"^1.0.5","minipass-pipeline":"^1.2.4","negotiator":"^0.6.3","promise-retry":"^2.0.1","ssri":"^10.0.0"},"devDependencies":{"@npmcli/eslint-config":"^4.0.0","@npmcli/template-oss":"4.18.0","nock":"^13.2.4","safe-buffer":"^5.2.1","standard-version":"^9.3.2","tap":"^16.0.0"},"engines":{"node":"^16.14.0 || >=18.0.0"},"tap":{"color":1,"files":"test/*.js","check-coverage":true,"timeout":60,"nyc-arg":["--exclude","tap-snapshots/**"]},"templateOSS":{"//@npmcli/template-oss":"This file is partially managed by @npmcli/template-oss. Edits may be overwritten.","ciVersions":["16.14.0","16.x","18.0.0","18.x"],"version":"4.18.0","publish":"true"}}');
+module.exports = JSON.parse('{"name":"make-fetch-happen","version":"13.0.1","description":"Opinionated, caching, retrying fetch client","main":"lib/index.js","files":["bin/","lib/"],"scripts":{"test":"tap","posttest":"npm run lint","eslint":"eslint","lint":"eslint \\"**/*.{js,cjs,ts,mjs,jsx,tsx}\\"","lintfix":"npm run lint -- --fix","postlint":"template-oss-check","snap":"tap","template-oss-apply":"template-oss-apply --force"},"repository":{"type":"git","url":"https://github.com/npm/make-fetch-happen.git"},"keywords":["http","request","fetch","mean girls","caching","cache","subresource integrity"],"author":"GitHub Inc.","license":"ISC","dependencies":{"@npmcli/agent":"^2.0.0","cacache":"^18.0.0","http-cache-semantics":"^4.1.1","is-lambda":"^1.0.1","minipass":"^7.0.2","minipass-fetch":"^3.0.0","minipass-flush":"^1.0.5","minipass-pipeline":"^1.2.4","negotiator":"^0.6.3","proc-log":"^4.2.0","promise-retry":"^2.0.1","ssri":"^10.0.0"},"devDependencies":{"@npmcli/eslint-config":"^4.0.0","@npmcli/template-oss":"4.21.4","nock":"^13.2.4","safe-buffer":"^5.2.1","standard-version":"^9.3.2","tap":"^16.0.0"},"engines":{"node":"^16.14.0 || >=18.0.0"},"tap":{"color":1,"files":"test/*.js","check-coverage":true,"timeout":60,"nyc-arg":["--exclude","tap-snapshots/**"]},"templateOSS":{"//@npmcli/template-oss":"This file is partially managed by @npmcli/template-oss. Edits may be overwritten.","version":"4.21.4","publish":"true"}}');
 
 /***/ }),
 
@@ -89397,7 +89664,7 @@ module.exports = JSON.parse('{"name":"make-fetch-happen","version":"13.0.0","des
 /***/ ((module) => {
 
 "use strict";
-module.exports = {"i8":"3.0.4"};
+module.exports = {"i8":"3.0.5"};
 
 /***/ })
 
